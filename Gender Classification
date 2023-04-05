@@ -1,0 +1,20 @@
+Task Description: The goal of this project was to classify images of chest X-ray images based on gender (male or female) using the Gender01 dataset.
+
+Model and Training Details:
+Dataset: Gender01 - A dataset of 247 chest X-ray images recorded in the "Standard Digital Image Database [Chest Mass Shadow Images]" of the Japan Society of Radiological Technology, classified by gender. The images have a matrix size of 256x256 and are in grayscale (8-bit).
+Data Transformations:
+•	ResNet-18: Images were resized to (256, 256), converted to tensors, and normalized with mean 0.5 and standard deviation 0.5.
+•	Swin Tiny: Images were resized to (224, 224), converted to tensors, and normalized with mean 0.5 and standard deviation 0.5.
+
+Hyperparameters and training process:
+•	ResNet-18: Pretrained model, CrossEntropyLoss, Adam optimizer with learning rate 0.001, trained for 50 epochs.
+•	Swin Tiny: Pretrained model, CrossEntropyLoss, Adam optimizer with learning rate 0.0001 and weight decay 1e-5, trained for 20 epochs.
+
+Results:
+•	ResNet-18: Test Loss: 0.4857, Test Accuracy: 94.62%, AUC (Male): 0.9498, AUC (Female): 0.9496, Mean AUC: 0.9497
+
+•	Swin Tiny: Test Loss: 0.6568, Test Accuracy: 90.32%, AUC (Male): 0.9367, AUC (Female): 0.9363, Mean AUC: 0.9365
+
+Analysis: Both models perform well in classifying the chest X-ray images based on gender. ResNet-18 has slightly better performance than Swin Tiny, with a higher test accuracy and mean AUC. However, the difference is not substantial, and both models have similar AUC scores for male and female classes, indicating their ability to distinguish between the two genders. The choice between the models would depend on the specific use case and resource constraints.
+
+
