@@ -17,6 +17,8 @@ from torchvision.transforms import transforms
 from google.colab import drive
 from sklearn.metrics import roc_auc_score
 import numpy as np
+from PIL import Image
+import matplotlib.pyplot as plt
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -50,7 +52,7 @@ criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Train the model
-num_epochs = 10
+num_epochs = 50
 for epoch in range(num_epochs):
     train_loss = 0
     train_correct = 0
@@ -72,44 +74,21 @@ for epoch in range(num_epochs):
 
     print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
 
-#Test the model
-
-test_loss = 0
-test_correct = 0
-model.eval()
-
-with torch.no_grad():
-    for inputs, labels in test_loader:
-        inputs, labels = inputs.to(device), labels.to(device)
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        test_loss += loss.item() * inputs.size(0)
-        _, preds = torch.max(outputs, 1)
-        test_correct += torch.sum(preds == labels.data)
-
-test_loss = test_loss / len(test_data)
-test_acc = test_correct.double() / len(test_data)
-
-print(f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
 
 
-
-#Update the weights
-torch.save(model.state_dict(), 'resnet18_directions.pt')
-
-#Calculate Performance metrics
-from sklearn.metrics import roc_auc_score
-import numpy as np
-
+# Test the model
 test_loss = 0
 test_correct = 0
 y_true = []
 y_scores = []
+correctly_classified = {0: [], 1: []}  # To store the correctly classified image IDs
+incorrectly_classified = {0: [], 1: []}  # To store the incorrectly classified image IDs
+
 
 model.eval()
 
 with torch.no_grad():
-    for inputs, labels in test_loader:
+    for i, (inputs, labels) in enumerate(test_loader):
         inputs, labels = inputs.to(device), labels.to(device)
         outputs = model(inputs)
         loss = criterion(outputs, labels)
@@ -117,9 +96,18 @@ with torch.no_grad():
         _, preds = torch.max(outputs, 1)
         test_correct += torch.sum(preds == labels.data)
 
+        # Store the IDs of the correctly classified images
+        for j in range(len(preds)):
+            img_id = test_data.samples[i * test_loader.batch_size + j][0]
+            if preds[j] == labels[j]:
+                correctly_classified[preds[j].item()].append(img_id)
+            else:
+                incorrectly_classified[labels[j].item()].append(img_id)
+
+
         # Convert labels to one-hot encoding
-        labels_onehot = torch.zeros(labels.size(0), 4).to(device)
-        labels_onehot.scatter_(1, labels.view(-1,1), 1)
+        labels_onehot = torch.zeros(labels.size(0), 2).to(device)  # Change 4 to 2 as there are only two classes (male and female)
+        labels_onehot.scatter_(1, labels.view(-1, 1), 1)
         y_true.append(labels_onehot.cpu().numpy())
 
         # Softmax outputs and extract probabilities for each class
@@ -144,6 +132,9 @@ print(f"AUC (Male): {auc_male:.4f}")
 print(f"AUC (Female): {auc_female:.4f}")
 print(f"Mean AUC: {mean_auc:.4f}")
 
+print("\nCorrectly classified images:")
+print("Males:", correctly_classified[0])
+print("Females:", correctly_classified[1])
 
 test_correct = 0
 model.eval()
@@ -157,3 +148,50 @@ with torch.no_grad():
 
 test_acc = test_correct.double() / len(test_data) * 100
 print(f"Test Accuracy: {test_acc:.2f}%")
+
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
+
+# Compute ROC curve and AUC for each class
+fpr_male, tpr_male, _ = roc_curve(y_true[:, 0], y_scores[:, 0])
+roc_auc_male = auc(fpr_male, tpr_male)
+
+fpr_female, tpr_female, _ = roc_curve(y_true[:, 1], y_scores[:, 1])
+roc_auc_female = auc(fpr_female, tpr_female)
+
+# Plot the ROC curve
+plt.figure()
+plt.plot(fpr_male, tpr_male, label=f'Male (AUC = {auc_male:.4f})')
+plt.plot(fpr_female, tpr_female, label=f'Female (AUC = {auc_female:.4f})')
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC)')
+plt.legend(loc="lower right")
+plt.show()
+
+from PIL import Image
+import math
+
+def display_images(image_paths, title):
+    num_images = len(image_paths)
+    images_per_row = 5
+    num_rows = math.ceil(num_images / images_per_row)
+
+    plt.figure(figsize=(16, 4 * num_rows))
+    plt.suptitle(title)
+
+    for i, img_path in enumerate(image_paths):
+        img = Image.open(img_path)
+        plt.subplot(num_rows, images_per_row, i + 1)
+        plt.imshow(img)
+        plt.axis('off')
+        img_id = img_path.split('/')[-1]  # Extract the image ID from the path
+        plt.title(img_id)  # Display the image ID as the title
+
+display_images(correctly_classified[0], 'Correctly Classified Males')
+display_images(correctly_classified[1], 'Correctly Classified Females')
+display_images(incorrectly_classified[0], 'Incorrectly Classified Males')
+display_images(incorrectly_classified[1], 'Incorrectly Classified Females')

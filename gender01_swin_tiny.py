@@ -18,6 +18,9 @@ from google.colab import drive
 from sklearn.metrics import roc_auc_score
 import numpy as np
 from timm.models import swin_tiny_patch4_window7_224  # import Swin Tiny
+import os
+from PIL import Image
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -41,14 +44,25 @@ test_loader = DataLoader(test_data, batch_size=64, shuffle=False)
 
 # Define the model
 model = swin_tiny_patch4_window7_224(pretrained=True, num_classes=2)
+num_features = model.head.in_features
+
+# Modify the model head by adding a dropout layer
+model.head = nn.Sequential(
+    nn.Dropout(0.5),
+    nn.Linear(num_features, 2)
+)
+
 model.to(device)
 
 # Define the loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-5)
+
+
+print("Class labels:", test_data.classes)
 
 # Train the model
-num_epochs = 10
+num_epochs = 20
 for epoch in range(num_epochs):
     train_loss = 0
     train_correct = 0
@@ -75,6 +89,13 @@ for epoch in range(num_epochs):
 test_loss = 0
 test_correct = 0
 model.eval()
+correct_male_image_ids = []
+correct_female_image_ids = []
+incorrect_male_image_ids = []
+incorrect_female_image_ids = []
+
+
+
 
 with torch.no_grad():
     for inputs, labels in test_loader:
@@ -85,10 +106,34 @@ with torch.no_grad():
         _, preds = torch.max(outputs, 1)
         test_correct += torch.sum(preds == labels.data)
 
+        # Get indices of correctly and incorrectly classified images
+        correct_indices = (preds == labels).nonzero(as_tuple=True)[0].tolist()
+        incorrect_indices = (preds != labels).nonzero(as_tuple=True)[0].tolist()
+
+        # Get the corresponding image IDs from the dataset
+        correct_ids = [test_data.samples[i][0] for i in correct_indices]
+        incorrect_ids = [test_data.samples[i][0] for i in incorrect_indices]
+
+        # Split the image IDs into male and female
+        correct_male_ids = [img_id for idx, img_id in zip(correct_indices, correct_ids) if labels[idx].item() == 1]
+        correct_female_ids = [img_id for idx, img_id in zip(correct_indices, correct_ids) if labels[idx].item() == 0]
+        incorrect_male_ids = [img_id for idx, img_id in zip(incorrect_indices, incorrect_ids) if labels[idx].item() == 1]
+        incorrect_female_ids = [img_id for idx, img_id in zip(incorrect_indices, incorrect_ids) if labels[idx].item() == 0]
+
+        # Add the image IDs to the lists
+        correct_male_image_ids.extend(correct_male_ids)
+        correct_female_image_ids.extend(correct_female_ids)
+        incorrect_male_image_ids.extend(incorrect_male_ids)
+        incorrect_female_image_ids.extend(incorrect_female_ids)
+
+
+
+
 test_loss = test_loss / len(test_data)
 test_acc = test_correct.double() / len(test_data)
 
 print(f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
+
 
 # Update the weights
 torch.save(model.state_dict(), 'swin_tiny_directions.pt')
@@ -114,7 +159,7 @@ with torch.no_grad():
         test_correct += torch.sum(preds == labels.data)
 
         # Convert labels to one-hot encoding
-        labels_onehot = torch.zeros(labels.size(0), 4).to(device)
+        labels_onehot = torch.zeros(labels.size(0), 2).to(device)
         labels_onehot.scatter_(1, labels.view(-1,1), 1)
         y_true.append(labels_onehot.cpu().numpy())
 
@@ -139,10 +184,15 @@ print(f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
 print(f"AUC (Male): {auc_male:.4f}")
 print(f"AUC (Female): {auc_female:.4f}")
 print(f"Mean AUC: {mean_auc:.4f}")
+print("Correctly classified male image IDs:", correct_male_image_ids)
+print("Correctly classified female image IDs:", correct_female_image_ids)
+
+
 
 
 test_correct = 0
 model.eval()
+
 
 with torch.no_grad():
     for inputs, labels in test_loader:
@@ -153,3 +203,46 @@ with torch.no_grad():
 
 test_acc = test_correct.double() / len(test_data) * 100
 print(f"Test Accuracy: {test_acc:.2f}%")
+
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
+
+# Calculate ROC curves
+fpr_male, tpr_male, _ = roc_curve(y_true[:, 0], y_scores[:, 0])
+fpr_female, tpr_female, _ = roc_curve(y_true[:, 1], y_scores[:, 1])
+
+# Plot ROC curves
+plt.figure()
+plt.plot(fpr_male, tpr_male, label=f'Male (AUC = {auc_male:.4f})')
+plt.plot(fpr_female, tpr_female, label=f'Female (AUC = {auc_female:.4f})')
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic (ROC)')
+plt.legend(loc="lower right")
+plt.show()
+
+import math
+
+def display_images(image_paths, title):
+    num_images = len(image_paths)
+    images_per_row = 5
+    num_rows = math.ceil(num_images / images_per_row)
+
+    plt.figure(figsize=(16, 4 * num_rows))
+    plt.suptitle(title)
+
+    for i, img_path in enumerate(image_paths):
+        img = Image.open(img_path)
+        plt.subplot(num_rows, images_per_row, i + 1)
+        plt.imshow(img)
+        plt.axis('off')
+        img_id = img_path.split('/')[-1]  # Extract the image ID from the path
+        plt.title(img_id)  # Display the image ID as the title
+
+display_images(correct_male_image_ids, 'Correctly Classified Males')
+display_images(correct_female_image_ids, 'Correctly Classified Females')
+display_images(incorrect_male_image_ids, 'Incorrectly Classified Males')
+display_images(incorrect_female_image_ids, 'Incorrectly Classified Females')
